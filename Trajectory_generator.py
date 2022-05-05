@@ -1,4 +1,7 @@
+#!/usr/bin/env python
+
 import math
+from tkinter import W
 import numpy as np
 from scipy.optimize import minimize_scalar
 import rospy
@@ -6,8 +9,8 @@ from trajectory_msgs.msg import MultiDOFJointTrajectory, MultiDOFJointTrajectory
 from geometry_msgs.msg import Vector3, Twist, Quaternion, Transform
 from trajectory_msgs.msg import MultiDOFJointTrajectoryPoint, MultiDOFJointTrajectory
 
-V_MAX = 4.5
-A_MAX = 5
+V_MAX = 4
+A_MAX = 4
 S_CAP = 0.1
 ROSPY_RATE = 100
 
@@ -24,7 +27,7 @@ def waypoint_publisher(poly_time_array):
     poly_x_array = []
     poly_y_array = []
     poly_z_array = []
-    rate = rospy.rate(ROSPY_RATE)
+    rate = rospy.Rate(ROSPY_RATE)
 
     for x in poly_time_array:
         total_time += x[1]
@@ -37,26 +40,41 @@ def waypoint_publisher(poly_time_array):
     dt = 1/ROSPY_RATE
     t0 = rospy.get_time()
 
+    print("Goint to pubsli")
+
+    print("poly_time_array : ",(poly_time_array))
+
+
     for i in range(0, math.ceil(total_time*ROSPY_RATE)):
         t = rospy.get_time() - t0
+        t = t if t < total_time else total_time
+        t_prev = 0
         for x in poly_time_array:
             if x[1]>t:
-                px = x[0][0](t)
-                py = x[0][1](t)
-                pz = x[0][2](t)
-                vx = np.polyder(px)(t)
-                vy = np.polyder(py)(t)
-                vz = np.polyder(pz)(t)
+                t -= t_prev
+                px = x[0][0]
+                py = x[0][1]
+                pz = x[0][2]
+                vx = np.polyder(px)
+                vy = np.polyder(py)
+                vz = np.polyder(pz)
+                px_ = px(t)
+                py_ = py(t)
+                pz_ = pz(t)
+                vx_ = vx(t)
+                vy_ = vy(t)
+                vz_ = vz(t)
 
                 rot = Quaternion(0,0,0,1)
-                trans = Vector3(px, py, pz)
-                vel_lin = Vector3(vx, vy, vz)
+                trans = Vector3(px_, py_, pz_)
+                vel_lin = Vector3(vx_, vy_, vz_)
                 vel_ang = Vector3(0,0,0)
                 accel_lin = Vector3(0,0,0)
                 accel_ang = Vector3(0,0,0)
 
                 point = MultiDOFJointTrajectoryPoint(transforms=[Transform(translation = trans, rotation = rot)], velocities = [Twist(linear = vel_lin, angular = vel_ang)], accelerations = [Twist(linear = accel_lin, angular = accel_ang)])
                 break
+            t_prev = x[1]
         pointPub.publish(point)
         rate.sleep()
 
@@ -66,12 +84,14 @@ def waypoint_publisher(poly_time_array):
 
 def waypointCallback(msg):
 
+    print("gotwaypoints.")
+
     waypoints = []
 
     for i in range(len(msg.points)):
-        px = msg.points[i].transformations[0].translation.x
-        py = msg.points[i].transformations[0].translation.y
-        pz = msg.points[i].transformations[0].translation.z
+        px = msg.points[i].transforms[0].translation.x
+        py = msg.points[i].transforms[0].translation.y
+        pz = msg.points[i].transforms[0].translation.z
         vx = msg.points[i].velocities[0].linear.x
         vy = msg.points[i].velocities[0].linear.y
         vz = msg.points[i].velocities[0].linear.z
@@ -86,6 +106,8 @@ def waypointCallback(msg):
         waypoints.append(waypt)
 
     poly_time_array = trajectory_with_time(waypoints)
+
+    waypoint_publisher(poly_time_array)
 
 
 def determine_coefficients(start, end, Spline_duration):
@@ -183,21 +205,22 @@ def spline_for_two_pts(start, end):
     end_for_time = end[:, 0]
     poly_mat = None
     t = None
-    for x in range(1000):
+    for x in range(100000):
         t, mul = determine_time(start_for_time, end_for_time, poly_mat, t)
         if abs(mul) <= S_CAP:
+            print(x, "iterations")
             break
         poly_mat = determine_coefficients(start, end, t)
     return poly_mat, t
 
 
-def trajectory_with_time(wavepoints):
+def trajectory_with_time(waypoints):
     # The array of all the points in the trajectory from start to end
     path_time_list = []
 
     for x in range(len(waypoints)-1):
         poly, time = spline_for_two_pts(waypoints[x], waypoints[x+1])
-        path_time_list.append = [poly, time]
+        path_time_list.append([poly, time])
 
     return path_time_list
 
@@ -213,8 +236,7 @@ def main():
     rospy.init_node("spline_traj_generator")
 
     rospy.Subscriber("/red/waypoints_to_spline", MultiDOFJointTrajectory, waypointCallback)
-    pointPub = rospy.Publisher("/red/position_hold/trajectory", MultiDOFJointTrajectoryPoint, queue_size = 1)
-
-
+    rospy.spin()
 
 if __name__ == "__main__":
+    main()
