@@ -5,14 +5,14 @@ from tkinter import W
 import numpy as np
 from scipy.optimize import minimize_scalar
 import rospy
-from trajectory_msgs.msg import MultiDOFJointTrajectory, MultiDOFJointTrajectoryPoint
 from geometry_msgs.msg import Vector3, Twist, Quaternion, Transform
 from trajectory_msgs.msg import MultiDOFJointTrajectoryPoint, MultiDOFJointTrajectory
 
-V_MAX = 4
-A_MAX = 4
+V_MAX = ( 3, 3, 6)
+A_MAX = ( 5, 5, 10)
 S_CAP = 0.1
 ROSPY_RATE = 100
+ALPHA = 0.01
 
 
 # Line 32 to 37 contain the equations of a0 to a5
@@ -43,7 +43,6 @@ def waypoint_publisher(poly_time_array):
     print("Goint to pubsli")
 
     print("poly_time_array : ",(poly_time_array))
-
 
     for i in range(0, math.ceil(total_time*ROSPY_RATE)):
         t = rospy.get_time() - t0
@@ -79,10 +78,7 @@ def waypoint_publisher(poly_time_array):
         rate.sleep()
 
 
-
-
-
-def waypointCallback(msg):
+def WaypointCallback(msg):
 
     print("gotwaypoints.")
 
@@ -155,31 +151,25 @@ def determine_time(start, end, poly_mat=None, T_old=None):
         t = dist / V_MAX
         return t, 1000
 
-    v_x = np.polyder(poly_mat[0])
-    v_y = np.polyder(poly_mat[1])
-    v_z = np.polyder(poly_mat[2])
-    a_x = np.polyder(poly_mat[0], m=2)
-    a_y = np.polyder(poly_mat[1], m=2)
-    a_z = np.polyder(poly_mat[2], m=2)
+    time_list = []
+    mul_list = []
 
-    v_net_sq = (v_x * v_x + v_y * v_y + v_z * v_z)
-    a_net_sq = (a_x * a_x + a_y * a_y + a_z * a_z)
+    for axis in range(3):
+        v = np.polyder(poly_mat[axis])
+        a = np.polyder(poly_mat[axis], m=2)
 
-    v_max_t = minimize_scalar(-v_net_sq, bounds=[0, T_old], method='bounded')
-    a_max_t = minimize_scalar(-a_net_sq, bounds=[0, T_old], method='bounded')
+        v_max_t = minimize_scalar(-v, bounds=[0, T_old], method='bounded').x
+        a_max_t = minimize_scalar(-a, bounds=[0, T_old], method='bounded').x
 
-    v_max = v_net_sq(v_max_t.x)
-    a_max = a_net_sq(a_max_t.x)
+        s = max(v(v_max_t) / V_MAX[axis], math.sqrt(a(a_max_t) / A_MAX[axis]))
 
-    v_max = math.sqrt(v_max)
-    a_max = math.sqrt(a_max)
+        mul = s-1
 
-    # print(v_max, "vmax")
+        mul_list.append(mul)
+        time_list.append(T_old * (1 + np.sign(mul) * ALPHA))
 
-    s = max(v_max / V_MAX, math.sqrt(a_max / A_MAX))
-    mul = s - 1
-
-    T = T_old * (1 + np.sign(mul) * 0.01)
+    T = max(time_list)
+    mul = max(time_list)
 
     return T, mul
 
@@ -235,8 +225,9 @@ def main():
 
     rospy.init_node("spline_traj_generator")
 
-    rospy.Subscriber("/red/waypoints_to_spline", MultiDOFJointTrajectory, waypointCallback)
+    rospy.Subscriber("/red/waypoints_to_spline", MultiDOFJointTrajectory, WaypointCallback)
     rospy.spin()
+
 
 if __name__ == "__main__":
     main()
