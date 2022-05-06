@@ -8,11 +8,13 @@ import rospy
 from geometry_msgs.msg import Vector3, Twist, Quaternion, Transform
 from trajectory_msgs.msg import MultiDOFJointTrajectoryPoint, MultiDOFJointTrajectory
 
-V_MAX = ( 3, 3, 6)
-A_MAX = ( 5, 5, 10)
-S_CAP = 0.1
+V_MAX = ( 2, 2, 4)
+A_MAX = ( 1, 1, 2)
+S_CAP = 0.05
 ROSPY_RATE = 100
 ALPHA = 0.01
+ITER = 500
+MAX_ITER = 2000
 
 
 # Line 32 to 37 contain the equations of a0 to a5
@@ -148,7 +150,7 @@ def determine_time(start, end, poly_mat=None, T_old=None):
 
     if poly_mat is None and T_old is None:
         dist = math.sqrt(np.sum(np.square(end - start)))
-        t = dist / V_MAX
+        t = dist / V_MAX[2]
         return t, 1000
 
     time_list = []
@@ -158,10 +160,13 @@ def determine_time(start, end, poly_mat=None, T_old=None):
         v = np.polyder(poly_mat[axis])
         a = np.polyder(poly_mat[axis], m=2)
 
-        v_max_t = minimize_scalar(-v, bounds=[0, T_old], method='bounded').x
-        a_max_t = minimize_scalar(-a, bounds=[0, T_old], method='bounded').x
+        v_max_t = minimize_scalar(-v, bounds=[0, T_old], method='bounded', options={'maxiter':MAX_ITER})
+        a_max_t = minimize_scalar(-a, bounds=[0, T_old], method='bounded', options={'maxiter':MAX_ITER})
 
-        s = max(v(v_max_t) / V_MAX[axis], math.sqrt(a(a_max_t) / A_MAX[axis]))
+        v_max = v(v_max_t.x)
+        a_max = a(a_max_t.x)
+
+        s = max( abs(v_max) / V_MAX[axis], math.sqrt( abs(a_max) / A_MAX[axis]))
 
         mul = s-1
 
@@ -195,7 +200,7 @@ def spline_for_two_pts(start, end):
     end_for_time = end[:, 0]
     poly_mat = None
     t = None
-    for x in range(100000):
+    for x in range(ITER):
         t, mul = determine_time(start_for_time, end_for_time, poly_mat, t)
         if abs(mul) <= S_CAP:
             print(x, "iterations")
@@ -209,6 +214,7 @@ def trajectory_with_time(waypoints):
     path_time_list = []
 
     for x in range(len(waypoints)-1):
+        print('determining coefficents for trajectory', x+1)
         poly, time = spline_for_two_pts(waypoints[x], waypoints[x+1])
         path_time_list.append([poly, time])
 
